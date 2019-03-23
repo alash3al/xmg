@@ -2,46 +2,55 @@ package main
 
 import (
 	"flag"
-	"image"
 	"log"
+	"strconv"
 	"strings"
 
-	"github.com/Kagami/go-face"
+	"github.com/rs/xid"
+
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/labstack/echo"
 )
 
 var (
-	flagHTTPAddr      = flag.String("listen", ":4068", "the http listen address")
-	flagDLIBModelsDir = flag.String("dlib-models", "./", "full path to the dlib models directory")
+	flagHTTPAddr = flag.String("listen", ":4068", "the http listen address")
+	flagDBPath   = flag.String("db", "./xmg-data", "the directory where the database will be located")
 )
 
 var (
-	recognizer *face.Recognizer
+	db *leveldb.DB
 )
 
 func init() {
 	flag.Parse()
-
-	rec, err := face.NewRecognizer(*flagDLIBModelsDir)
+	var err error
+	db, err = leveldb.OpenFile(*flagDBPath, nil)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-
-	recognizer = rec
 }
 
 func main() {
-	defer recognizer.Close()
+	defer db.Close()
 
 	e := echo.New()
-
 	e.HideBanner = true
 
-	e.POST("/:needle", func(c echo.Context) error {
-		needle := strings.ToLower(c.Param("needle"))
-		if needle != "all" && needle != "faces" {
-			needle = "all"
+	e.POST("/:action", func(c echo.Context) error {
+		action := strings.ToLower(c.Param("action"))
+		if action != "search" && action != "submit" {
+			action = "search"
+		}
+
+		maxDistance, _ := strconv.Atoi(c.QueryParam("maxdist"))
+		if maxDistance < 0 {
+			maxDistance = 0
+		}
+
+		id := c.QueryParam("id")
+		if "" == id {
+			id = xid.New().String()
 		}
 
 		file, err := c.FormFile("image")
@@ -60,26 +69,26 @@ func main() {
 			})
 		}
 
-		allProps := []image.Image{}
+		allProps := getAllImageOrientations(img)
+		hashes := processImagesHashes(allProps)
 
-		if "faces" == needle {
-			faces, err := processFacialExtraction(img)
-			if err != nil {
-				return c.JSON(500, map[string]interface{}{
+		if "submit" == action {
+			if err := storeAppend(id, hashes...); err != nil {
+				return c.JSON(400, map[string]interface{}{
 					"success": false,
 					"error":   "#3 - " + err.Error(),
 				})
 			}
-			for _, face := range faces {
-				allProps = append(allProps, getAllImageOrientations(face)...)
-			}
-		} else {
-			allProps = append(allProps, getAllImageOrientations(img)...)
+
+			return c.JSON(200, map[string]interface{}{
+				"success": true,
+				"payload": id,
+			})
 		}
 
 		return c.JSON(200, map[string]interface{}{
 			"success": true,
-			"payload": processImagesHashes(allProps),
+			"payload": storeFind(maxDistance, hashes...),
 		})
 	})
 

@@ -9,8 +9,6 @@ import (
 
 	"github.com/corona10/goimagehash"
 
-	"github.com/rs/xid"
-
 	"github.com/disintegration/imaging"
 )
 
@@ -38,43 +36,23 @@ func processSingleFileUpload(file *multipart.FileHeader) (image.Image, error) {
 
 // processImageHash ...
 func processImageHash(img image.Image) (*goimagehash.ImageHash, error) {
+	img = imaging.Grayscale(img)
 	return goimagehash.PerceptionHash(img)
 }
 
 // processImagesHashes ...
-func processImagesHashes(imgs []image.Image) map[string]interface{} {
-	hashes := map[string]interface{}{}
+func processImagesHashes(imgs []image.Image) []*goimagehash.ImageHash {
+	hashes := []*goimagehash.ImageHash{}
 	for _, img := range imgs {
 		hash, err := processImageHash(img)
 		if err != nil {
 			continue
 		}
 
-		hashes[hash.ToString()] = hash.GetHash()
+		hashes = append(hashes, hash)
 	}
 
 	return hashes
-}
-
-// processFacialExtraction ...
-func processFacialExtraction(img image.Image) ([]image.Image, error) {
-	filename := filepath.Join(os.TempDir(), xid.New().String()+".jpg")
-	if err := imaging.Save(img, filename); err != nil {
-		return nil, err
-	}
-
-	faces, err := recognizer.RecognizeFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	ret := []image.Image{}
-
-	for _, face := range faces {
-		ret = append(ret, face.Rectangle)
-	}
-
-	return ret, nil
 }
 
 func getAllImageOrientations(img image.Image) []image.Image {
